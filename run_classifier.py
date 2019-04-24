@@ -203,6 +203,65 @@ class DataProcessor(object):
         lines.append(line)
       return lines
 
+class LCQMCProcessor(DataProcessor):
+  """Processor for the XNLI data set."""
+
+  def __init__(self):
+    self.language = "zh"
+
+  def get_train_examples(self, data_dir):
+    """See base class."""
+    # 读取文件注意可能会有特殊起始符
+    lines = self.read_data(
+        os.path.join(data_dir, "LCQMC", "LCQMC_train_seg_with_sw.dat"))
+    examples = []
+    for (i, line) in enumerate(lines):
+      guid = "train-%d" % (i)
+      text_a = tokenization.convert_to_unicode(line[0])
+      text_b = tokenization.convert_to_unicode(line[1])
+      label = tokenization.convert_to_unicode(line[2])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+    return examples
+
+  def get_dev_examples(self, data_dir):
+    """See base class."""
+    lines = self.read_data(os.path.join(data_dir, "LCQMC", "LCQMC_dev_seg_with_sw.dat"))
+    examples = []
+    for (i, line) in enumerate(lines):
+      guid = "dev-%d" % (i)
+      text_a = tokenization.convert_to_unicode(line[0])
+      text_b = tokenization.convert_to_unicode(line[1])
+      label = tokenization.convert_to_unicode(line[2])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+    return examples
+
+  def get_test_examples(self, data_dir):
+    """See base class."""
+    lines = self.read_data(os.path.join(data_dir, "LCQMC", "LCQMC_test_seg_with_sw.dat"))
+    examples = []
+    for (i, line) in enumerate(lines):
+      guid = "test-%d" % (i)
+      text_a = tokenization.convert_to_unicode(line[0])
+      text_b = tokenization.convert_to_unicode(line[1])
+      label = tokenization.convert_to_unicode(line[2])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+    return examples
+
+  def read_data(input_file, quotechar=None):
+      """Reads a tab separated value file."""
+      with codecs.open(input_file, "r", encoding='utf-8_sig') as f:
+          reader = csv.reader(f, delimiter="\t", quotechar=quotechar)
+          lines = []
+          for line in reader:
+              lines.append(line)
+      return lines
+
+  def get_labels(self):
+    """See base class."""
+    return ["0", "1"]
 
 class XnliProcessor(DataProcessor):
   """Processor for the XNLI data set."""
@@ -674,11 +733,13 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      pred_classes = tf.argmax(logits, axis=1)
+      acc_op = tf.metrics.accuracy(labels=label_ids, predictions=pred_classes)
+      output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
           loss=total_loss,
           train_op=train_op,
-          scaffold_fn=scaffold_fn)
+          eval_metric_ops={'accuracy': acc_op})
     elif mode == tf.estimator.ModeKeys.EVAL:
 
       def metric_fn(per_example_loss, label_ids, logits, is_real_example):
@@ -788,6 +849,7 @@ def main(_):
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
+      "lcqmc": LCQMCProcessor
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
@@ -855,14 +917,16 @@ def main(_):
       use_one_hot_embeddings=FLAGS.use_tpu)
 
   # If TPU is not available, this will fall back to normal Estimator on CPU
-  # or GPU.
-  estimator = tf.contrib.tpu.TPUEstimator(
-      use_tpu=FLAGS.use_tpu,
-      model_fn=model_fn,
-      config=run_config,
-      train_batch_size=FLAGS.train_batch_size,
-      eval_batch_size=FLAGS.eval_batch_size,
-      predict_batch_size=FLAGS.predict_batch_size)
+  # or GPU. tf.estimator.Estimator
+  # estimator = tf.contrib.tpu.TPUEstimator(
+  #     use_tpu=FLAGS.use_tpu,
+  #     model_fn=model_fn,
+  #     config=run_config,
+  #     train_batch_size=FLAGS.train_batch_size,
+  #     eval_batch_size=FLAGS.eval_batch_size,
+  #     predict_batch_size=FLAGS.predict_batch_size)
+
+  estimator = tf.estimator.Estimator(model_fn=model_fn)
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
